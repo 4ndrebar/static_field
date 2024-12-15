@@ -87,95 +87,69 @@ class StaticSolver:
             self.conductors = []
 
     def get_bbox(self, obj: Shape):
+        shape_type = type(obj).__name__
+
         if isinstance(obj, Cube):
-            sidelen = int(max(obj.side / self.resolution, 1))
-            bbox = np.full((sidelen, sidelen, sidelen), True, dtype=bool)
-
+            dimensions = (obj.side, obj.side, obj.side)
         elif isinstance(obj, Brick):
-            dimensions = tuple(
-                int(max(dim / self.resolution, 1)) for dim in obj.dimensions
-            )
-            bbox = np.full(dimensions, True, dtype=bool)
-
+            dimensions = obj.dimensions
         elif isinstance(obj, Sphere):
-            sidelen = int(max(2 * obj.radius / self.resolution, 1))
-            bbox = np.zeros(
-                (sidelen, sidelen, sidelen), dtype=bool
-            )  # Initialize with False
-
-            # Create a grid of coordinates
-            center = sidelen // 2
-            radius_voxel = obj.radius / self.resolution
-            x, y, z = np.ogrid[:sidelen, :sidelen, :sidelen]
-            distance = np.sqrt(
-                (x - center) ** 2 + (y - center) ** 2 + (z - center) ** 2
-            )
-
-            # Fill `True` for points inside the sphere
-            bbox[distance <= radius_voxel] = True
-
+            dimensions = (2 * obj.radius,) * 3
         elif isinstance(obj, Slab):
-            dimensions = tuple(
-                int(max(dim / self.resolution, 1)) for dim in obj.dimensions
-            )
-            bbox2d = np.full(dimensions, True, dtype=bool)
-            bbox = np.expand_dims(bbox2d, axis=obj.normal - 1)
-
+            dimensions_2d = obj.dimensions
+            dimensions = np.insert(dimensions_2d, obj.normal - 1, 1)
         else:
-            raise TypeError(f"Unsupported shape type: {type(obj).__name__}")
+            raise TypeError(f"Unsupported shape type: {shape_type}")
+
+        scaled_dimensions = tuple(int(max(dim / self.resolution, 1)) for dim in dimensions)
+        bbox = np.zeros(scaled_dimensions, dtype=bool)
+
+        if isinstance(obj, Sphere):
+            center = scaled_dimensions[0] // 2
+            radius_voxel = obj.radius / self.resolution
+            x, y, z = np.ogrid[:scaled_dimensions[0], :scaled_dimensions[1], :scaled_dimensions[2]]
+            distance = np.sqrt((x - center) ** 2 + (y - center) ** 2 + (z - center) ** 2)
+            bbox[distance <= radius_voxel] = True
+        else:
+            bbox.fill(True)
 
         return bbox
 
-    def add_conductor(self, voltage:float , object:Shape, position: Tuple[float, float, float]):
-        cond = Conductor(voltage, object)
 
-        if not (isinstance(position, tuple) and len(position) == 3):
-            raise TypeError("dimensions must be a tuple of three integers.")
-        self.conductors.append(cond)
-        self.add_object(cond.shape, position)
-    
-        bbox = self.get_bbox(object)
-        center_scaled = object.center / self.resolution
-        bbox_center = np.round(center_scaled).astype(int)
 
-        position = np.array(position)
-        position_scaled = position / self.resolution
-        position_index = np.round(position_scaled).astype(int)
+
+
+    def _validate_tuple(obj, length, dtype, name):
+        if not (isinstance(obj, tuple) and len(obj) == length and all(isinstance(i, dtype) for i in obj)):
+            raise TypeError(f"{name} must be a tuple of {length} {dtype.__name__}s.")
+
+
+
+    def _insert_shape(self, shape: Shape, position: Tuple[float, float, float], array, value=None):
+        self._validate_tuple(position, 3, (int, float), "position")
+        
+        bbox = self.get_bbox(shape)
+        bbox_center = np.round(np.array(shape.center) / self.resolution).astype(int)
+        position_index = np.round(np.array(position) / self.resolution).astype(int)
+
         # Compute slices
-        start_index = [position_index[i] - bbox_center[i] for i in range(3)]
-        end_index = [start_index[i] + bbox.shape[i] for i in range(3)]
-
-        # Generate slices for both arrays
+        start_index = position_index - bbox_center
+        end_index = start_index + np.array(bbox.shape)
         large_slice = tuple(slice(start_index[i], end_index[i]) for i in range(3))
-        small_slice = tuple(slice(None) for _ in range(3))  # Full range of small array
-        self.V[large_slice] = np.where(
-            bbox[small_slice], voltage, self.V[large_slice]
-        )
+        
+        if value is not None:
+            array[large_slice] = np.where(bbox, value, array[large_slice])
+        else:
+            array[large_slice] = np.logical_or(array[large_slice], bbox)
 
 
-    def add_object(self, object: Shape, position: Tuple[float, float, float]):
-        """
-        Adds an Insulator or a Conductor to the simulation
-        """
-        if not (isinstance(position, tuple) and len(position) == 3):
-            raise TypeError("dimensions must be a tuple of three integers.")
-        bbox = self.get_bbox(object)
-        center_scaled = object.center / self.resolution
-        bbox_center = np.round(center_scaled).astype(int)
+    def add_object(self, shape: Shape, position: Tuple[float, float, float]):
+        self._insert_shape(shape, position, self.conductor_pixels)
 
-        position = np.array(position)
-        position_scaled = position / self.resolution
-        position_index = np.round(position_scaled).astype(int)
-        # Compute slices
-        start_index = [position_index[i] - bbox_center[i] for i in range(3)]
-        end_index = [start_index[i] + bbox.shape[i] for i in range(3)]
+    def add_conductor(self, voltage: float, shape: Shape, position: Tuple[float, float, float]):
+        self.conductors.append(Conductor(voltage, shape))
+        self._insert_shape(shape, position, self.V, value=voltage)
 
-        # Generate slices for both arrays
-        large_slice = tuple(slice(start_index[i], end_index[i]) for i in range(3))
-        small_slice = tuple(slice(None) for _ in range(3))  # Full range of small array
-        self.conductor_pixels[large_slice] = np.where(
-            bbox[small_slice], 1, self.conductor_pixels[large_slice]
-        )
 
 
 # Function to plot slices along different axes
