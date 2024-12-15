@@ -99,52 +99,84 @@ class StaticSolver:
             )
             self.kern2d = kern2d
 
-    def evolve(self, iterations=2000, sigma = 3):
+    def evolve(self, iterations=2000, sigma=3, etol=1e-6):
+        """
+        Evolve the entire 3D grid over a specified number of iterations.
+
+        Parameters:
+        - iterations: int, maximum number of iterations to run.
+        - sigma: float, standard deviation for Gaussian smoothing.
+        - etol: float, tolerance for early stopping based on error convergence.
+        """
         err = []
-        
+
+        # Apply Gaussian filter to smooth the initial grid
         grid = gaussian_filter(self.V, sigma=sigma)
+
+        # Iterate over the grid
         for _ in tqdm(range(iterations)):
+            # Perform convolution with the 3D kernel
             V_ = convolve(grid, self.kern3d, mode="constant")
-            # Boundary conditions (neumann)
-            # Boundary conditions (dirchlett)
+
+            # Apply boundary conditions
+            # Dirichlet boundary conditions: enforce values on conductor pixels
             V_[self.conductor_pixels] = self.V[self.conductor_pixels]
-            # See what error is between consecutive arrays
-            err.append(np.mean((grid - V_) ** 2))
+
+            # Calculate error between consecutive iterations
+            error = np.mean((grid - V_) ** 2)
+            err.append(error)
+
+            # Update the grid
             grid = V_
+
+            # Early stopping if error converges
+            if error < etol:
+                break
+
+        # Save the evolved grid and error history
         self.V_evolved = V_
         self.err = err
 
-    def evolve_slice(self, z_slice: float, iterations=2000, sigma=3):
+    def evolve_slice(self, z_slice: float, iterations=2000, sigma=3, etol=1e-6):
         """
         Evolve the system for a single 2D slice along the z-axis.
+
+        Parameters:
+        - z_slice: float, the z-coordinate of the slice to evolve.
+        - iterations: int, maximum number of iterations to run.
+        - sigma: float, standard deviation for Gaussian smoothing.
+        - etol: float, tolerance for early stopping based on error convergence.
         """
         err = []
+
+        # Determine the index corresponding to the z_slice
         z_index = round(z_slice / self.resolution)
 
-        # Extract 2D slice and conductor pixels for the slice
+        # Extract the 2D slice and conductor pixels for the slice
         grid = self.V[:, :, z_index]
         conductor_pixels_slice = self.conductor_pixels[:, :, z_index]
 
-        # Apply Gaussian filter to smooth the initial grid
+        # Apply Gaussian filter to smooth the initial slice
         grid = gaussian_filter(grid, sigma=sigma)
 
         # Iterate for the specified number of iterations
         for _ in tqdm(range(iterations)):
-            # Convolve the slice with the 2D kernel
+            # Perform convolution with the 2D kernel
             V_ = convolve(grid, self.kern2d, mode="constant")
 
-            # Apply boundary conditions: Dirichlet for conductor pixels
-            V_[conductor_pixels_slice] = self.V[conductor_pixels_slice, z_index]
+            # Apply boundary conditions
+            # Dirichlet boundary conditions: enforce values on conductor pixels
+            V_[conductor_pixels_slice] = self.V[:, :, z_index][conductor_pixels_slice]
 
-            # Calculate error and append
+            # Calculate error between consecutive iterations
             error = np.mean((grid - V_) ** 2)
             err.append(error)
 
-            # Update the grid for the next iteration
+            # Update the grid
             grid = V_
 
             # Early stopping if error converges
-            if error < 1e-6:
+            if error < etol:
                 break
 
         # Save the evolved slice and error history
@@ -224,26 +256,34 @@ class StaticSolver:
         self.add_object(shape, position)
 
 
-    def plot_slice(self, z_slice=None, levels=40):
+    def plot_slice(self, z_slice=None, levels=40, plot_err=True, quiver_scale=(0.1, 1.0)):
+        """
+        Visualize a 2D slice of the evolved potential and its gradient.
+
+        Parameters:
+        - z_slice: float, the z-coordinate of the slice to plot (optional for 3D systems).
+        - levels: int, the number of contour levels for the potential.
+        - plot_err: bool, whether to plot the error log.
+        - quiver_scale: tuple, (min_scale, max_scale) to control quiver arrow lengths.
+        """
+        # Handle 2D vs 3D arrays
         if len(np.shape(self.V_evolved)) == 2:
-            array = self.V_evolved[:, :, np.newaxis]
-            z_index = 0
+            array = self.V_evolved[:, :, np.newaxis]  # Convert 2D to pseudo-3D
+            z_index = 0  # Only one slice available
         else:
             array = self.V_evolved
             z_index = round(z_slice / self.resolution)
         
-        # Create a grid for physical x and y coordinates
+        # Create physical coordinates grid
         x = np.arange(0, self.size[0], self.resolution)
         y = np.arange(0, self.size[1], self.resolution)
-        xx, yy = np.meshgrid(x, y)  # Reverse y for proper orientation
-
-        # Transpose the array to correct the axis mapping
+        xx, yy = np.meshgrid(x, y)  # Grid for plotting
+        
+        # Extract and transpose the slice for correct orientation
         array_slice = array[:, :, z_index].T
 
-        # --- First Plot: Imshow with Contours ---
+        # --- First Plot: Potential (Imshow + Contours) ---
         fig, ax1 = plt.subplots(figsize=(8, 6))
-        
-        # Imshow with colormap
         im = ax1.imshow(
             array_slice,
             extent=[x[0], x[-1], y[0], y[-1]],
@@ -251,7 +291,6 @@ class StaticSolver:
             origin="lower",
             aspect="equal"
         )
-        # Overlay contour lines
         CS = ax1.contour(
             xx, yy, array_slice, levels=levels, colors="black", linewidths=0.7, alpha=0.8
         )
@@ -265,26 +304,34 @@ class StaticSolver:
         # --- Second Plot: Gradient Map with Quiver ---
         fig, ax2 = plt.subplots(figsize=(8, 6))
         
-        # Compute the gradient (negative for electric field)
+        # Compute gradient (negative for electric field)
         dy, dx = np.gradient(-array_slice, self.resolution, self.resolution)
-        
-        # Background potential
+
+        # Compute the magnitude of the gradient
+        magnitude = np.sqrt(dx**2 + dy**2)
+
+        # Normalize and scale the gradient vectors
+        max_magnitude = magnitude.max()
+        scale_factor = (quiver_scale[1] - quiver_scale[0]) / max_magnitude
+        U = dx * scale_factor
+        V = dy * scale_factor
+
+        # Background potential map
         im2 = ax2.imshow(
             array_slice,
             extent=[x[0], x[-1], y[0], y[-1]],
-            cmap="coolwarm",  # Diverging colormap for gradient visualization
+            cmap="coolwarm",
             origin="lower",
             aspect="equal",
             alpha=0.6
         )
         plt.colorbar(im2, ax=ax2, label="Potential (V)", shrink=0.8)
 
-        # Quiver plot for gradient vectors
+        # Quiver plot with scaled arrow lengths
         ax2.quiver(
-            xx, yy, dx, dy,
+            xx, yy, U, V,
             color="black",
-            scale=40,  # Scale arrows for visibility
-            width=0.002,  # Arrow thickness
+            width=0.002,
             headwidth=3,
             alpha=0.8
         )
@@ -292,8 +339,17 @@ class StaticSolver:
         ax2.set_xlabel("$x$")
         ax2.set_ylabel("$y$")
         ax2.set_aspect("equal")
-        plt.tight_layout()
 
+        # --- Third Plot (Optional): Error Log ---
+        if plot_err:
+            fig, ax3 = plt.subplots(figsize=(8, 6))
+            ax3.semilogy(np.arange(len(self.err)), self.err)
+            ax3.set_title("Error Log")
+            ax3.set_xlabel("Epoch")
+            ax3.set_ylabel("Error")
+            plt.tight_layout()
+
+        # Show all plots
         plt.show()
 
 
@@ -307,12 +363,12 @@ if __name__ == "__main__":
     c = Cube(3)
     sl = Slab(1, (10, 10))
     ss = Sphere(1)
-    # solver.add_conductor(5, s, (20, 15, 15))
-    # solver.add_conductor(10, sl,(15,15,15))
-    # solver.add_conductor(-5, s, (10, 15, 15))
+    solver.add_conductor(5, s, (20, 15, 15))
+    solver.add_conductor(10, sl,(15,15,15))
+    solver.add_conductor(-5, s, (10, 15, 15))
     solver.add_conductor(-10, c, (5, 5, 15))
     # solver.evolve_slice(15)
     # solver.plot_slice()
-    solver.evolve()
+    solver.evolve(iterations=100)
     solver.plot_slice(z_slice=15, levels = 40)
     plt.show()
