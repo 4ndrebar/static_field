@@ -5,9 +5,12 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import convolve, generate_binary_structure
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
+import copy
 
 # TODO
 # [ ] check for conductor intersections
+# [ ] add insulators
+# [ ] add von neumann BC for insulators
 
 
 class Conductor:
@@ -120,10 +123,10 @@ class StaticSolver:
             self.size = np.array(simulation_size)
             self.resolution = resolution
             self.V = np.zeros(
-                shape=np.round(self.size / self.resolution).astype(int), dtype=float
+                shape=np.round(self.size / self.resolution).astype(int), dtype=np.float32
             )
             self.conductor_pixels = np.zeros(
-                shape=np.round(self.size / self.resolution).astype(int), dtype=bool
+                shape=np.round(self.size / self.resolution).astype(int), dtype=np.bool_
             )
             self.conductors = []
             kern = generate_binary_structure(3, 1).astype(float) / 6
@@ -134,89 +137,109 @@ class StaticSolver:
             )
             self.kern2d = kern2d
 
-    def evolve(self, iterations=2000, sigma=3, etol=1e-5):
+    def evolve(self, iterations=2000, sigma=None, etol=1e-5, rtol=1e-5):
         """
         Evolve the entire 3D grid over a specified number of iterations.
 
         Parameters:
-          iterations: int, maximum number of iterations to run.
-          sigma: float, standard deviation for Gaussian smoothing.
-          etol: float, tolerance for early stopping based on error convergence.
+        iterations: int, maximum number of iterations to run.
+        sigma: float, standard deviation for Gaussian smoothing.
+        etol: float, tolerance for early stopping based on error convergence.
+        rtol: float, relative tolerance for early stopping.
         """
-        err = []
+        # Optionally smooth the initial grid
+        if sigma is not None:
+            self.V = gaussian_filter(self.V, sigma=sigma, mode='constant')
 
-        # Apply Gaussian filter to smooth the initial grid
-        grid = gaussian_filter(self.V, sigma=sigma)
+        # Preallocate error history
+        self.err = np.zeros(iterations)
+        self.rerr = np.zeros(iterations)
 
-        # Iterate over the grid
-        for _ in tqdm(range(iterations)):
-            # Perform convolution with the 3D kernel
-            V_ = convolve(grid, self.kern3d, mode="constant")
+        # Preallocate temporary array
+        V_ = np.zeros_like(self.V, dtype=self.V.dtype)
 
-            # Apply boundary conditions
-            # Dirichlet boundary conditions: enforce values on conductor pixels
+        grid_size = self.V.size  # For efficient error calculations
+
+        for i in tqdm(range(iterations)):
+            # Perform convolution
+            convolve(self.V, self.kern3d, output=V_, mode="constant")
+
+            # Enforce boundary conditions
             V_[self.conductor_pixels] = self.V[self.conductor_pixels]
 
-            # Calculate error between consecutive iterations
-            error = np.mean((grid - V_) ** 2)
-            err.append(error)
+            # Compute errors
+            diff_sum = np.sum((self.V - V_) ** 2)
+            grid_sum = np.sum(self.V ** 2)
+            abs_error = diff_sum / grid_size
+            rel_error = abs_error / (grid_sum / grid_size)
 
-            # Update the grid
-            grid = V_
+            # Record errors
+            self.err[i] = abs_error
+            self.rerr[i] = rel_error
 
-            # Early stopping if error converges
-            if error < etol:
+            # Check convergence criteria
+            if abs_error < etol or rel_error < rtol:
+                self.err = self.err[:i+1]
+                self.rerr = self.rerr[:i+1]
                 break
 
-        # Save the evolved grid and error history
-        self.V_evolved = V_
-        self.err = err
+            # Swap V and V_ without deep copying
+            self.V, V_ = V_, self.V
 
-    def evolve_slice(self, z_slice: float, iterations=2000, sigma=3, etol=1e-5):
-        """
-        Evolve the system for a single 2D slice along the z-axis.
+        # Save the final evolved grid
+        self.V_evolved = self.V
 
-        Parameters:
-          z_slice: float, the z-coordinate of the slice to evolve.
-          iterations: int, maximum number of iterations to run.
-          sigma: float, standard deviation for Gaussian smoothing.
-          etol: float, tolerance for early stopping based on error convergence.
-        """
-        err = []
-
-        # Determine the index corresponding to the z_slice
+    def evolve_slice(self, z_slice: float, iterations=2000, sigma=None, etol=1e-5, rtol=1e-5):
         z_index = round(z_slice / self.resolution)
 
-        # Extract the 2D slice and conductor pixels for the slice
-        grid = self.V[:, :, z_index]
+        # Extract slice without unnecessary copies
+        grid = self.V[:, :, z_index].copy()
         conductor_pixels_slice = self.conductor_pixels[:, :, z_index]
 
-        # Apply Gaussian filter to smooth the initial slice
-        grid = gaussian_filter(grid, sigma=sigma)
+        # Optionally smooth the initial slice
+        if sigma is not None:
+            grid = gaussian_filter(grid, sigma=sigma, mode='constant')
 
-        # Iterate for the specified number of iterations
-        for _ in tqdm(range(iterations)):
-            # Perform convolution with the 2D kernel
-            V_ = convolve(grid, self.kern2d, mode="constant")
+        # Preallocate error history
+        self.err = np.zeros(iterations)
+        self.rerr = np.zeros(iterations)
 
-            # Apply boundary conditions
-            # Dirichlet boundary conditions: enforce values on conductor pixels
-            V_[conductor_pixels_slice] = self.V[:, :, z_index][conductor_pixels_slice]
+        # Preallocate temporary arrays
+        V_ = np.zeros_like(grid, dtype=grid.dtype)
 
-            # Calculate error between consecutive iterations
-            error = np.mean((grid - V_) ** 2)
-            err.append(error)
+        grid_size = grid.size  # For efficiency in error calculation
+        
 
-            # Update the grid
-            grid = V_
+        for i in tqdm(range(iterations)):
+            # Perform convolution
+            convolve(grid, self.kern2d, output=V_, mode="constant")
 
-            # Early stopping if error converges
-            if error < etol:
+            # Enforce boundary conditions
+            V_[conductor_pixels_slice] = grid[conductor_pixels_slice]
+
+            # Compute errors
+            diff_sum = np.sum((grid - V_) ** 2)
+            grid_sum = np.sum(grid ** 2)
+            abs_error = diff_sum / grid_size
+            rel_error = abs_error / (grid_sum / grid_size)
+
+            # Record errors
+            self.err[i] = abs_error
+            self.rerr[i] = rel_error
+
+            # Check convergence criteria
+            if abs_error < etol or rel_error < rtol:
+                self.err = self.err[:i+1]
+                self.rerr = self.rerr[:i+1]
                 break
 
-        # Save the evolved slice and error history
-        self.V_evolved = V_
-        self.err = err
+            # Swap grid and V_ without deep copying
+            grid, V_ = V_, grid
+
+        # Save the final evolved slice
+        self.V_evolved = grid
+
+
 
     def get_bbox(self, obj: Shape):
         shape_type = type(obj).__name__
@@ -343,16 +366,15 @@ class StaticSolver:
         _, ax2 = plt.subplots(figsize=(8, 6))
 
         # Compute gradient (negative for electric field)
-        dy, dx = np.gradient(-array_slice, self.resolution, self.resolution)
-
+        E = np.gradient(-array_slice, self.resolution, self.resolution)
+        Ey,Ex = E
         # Compute the magnitude of the gradient
-        magnitude = np.sqrt(dx**2 + dy**2)
+        E_magnitude = np.sqrt(Ex**2+Ey**2)
 
         # Normalize and scale the gradient vectors
-        max_magnitude = magnitude.max()
+        max_magnitude = E_magnitude.max()
         scale_factor = (quiver_scale[1] - quiver_scale[0]) / max_magnitude
-        U = dx * scale_factor
-        V = dy * scale_factor
+        Ey_norm, Ex_norm = [Ei*scale_factor for Ei in E]
 
         # Background potential map
         im2 = ax2.imshow(
@@ -366,19 +388,33 @@ class StaticSolver:
         plt.colorbar(im2, ax=ax2, label="Potential (V)", shrink=0.8)
 
         # Quiver plot with scaled arrow lengths
-        ax2.quiver(xx, yy, U, V, color="black", width=0.002, headwidth=3, alpha=0.8)
+        ax2.quiver(xx, yy, Ex_norm, Ey_norm, color="black", width=0.002, headwidth=3, alpha=0.8)
         ax2.set_title(f"Electric Field Gradient Slice at z = {z_slice}", fontsize=12)
         ax2.set_xlabel("$x$")
         ax2.set_ylabel("$y$")
         ax2.set_aspect("equal")
+        
+        # --- Third Plot : Plot of electric field magnitude ---
+        _, ax3 = plt.subplots(figsize = (8,6))
+        ax3.imshow(
+        E_magnitude,
+        extent=[x[0], x[-1], y[0], y[-1]],
+        cmap="plasma",  # Vibrant colormap
+        origin="lower",
+        aspect="equal",
+        )
+        
 
-        # --- Third Plot (Optional): Error Log ---
+
+        # --- Fourth Plot (Optional): Error Log ---
         if plot_err:
-            _, ax3 = plt.subplots(figsize=(8, 6))
-            ax3.semilogy(np.arange(len(self.err)), self.err)
-            ax3.set_title("Error Log")
-            ax3.set_xlabel("Epoch")
-            ax3.set_ylabel("Error")
+            _, ax4 = plt.subplots(figsize=(8, 6))
+            ax4.semilogy(np.arange(len(self.err)), self.err, label = "absolute error")
+            ax4.semilogy(np.arange(len(self.rerr)), self.rerr, label = "relative error")
+            ax4.set_title("Error Log")
+            ax4.set_xlabel("Epoch")
+            ax4.set_ylabel("Error")
+            ax4.legend()
             plt.tight_layout()
 
         # Show all plots
@@ -386,18 +422,20 @@ class StaticSolver:
 
 
 if __name__ == "__main__":
-    resolution = 0.2
+    resolution = 0.1
     solver = StaticSolver(simulation_size=(30, 30, 30), resolution=resolution)
     s = Sphere(2)
     c = Cube(3)
     sl = Slab(1, (10, 10))
     ss = Sphere(1)
     solver.add_conductor(5, s, (20, 15, 15))
-    solver.add_conductor(50, sl, (15, 23, 15))
-    solver.add_conductor(-5, s, (10, 15, 15))
+    solver.add_conductor(13, sl, (15, 23, 15))
+    solver.add_conductor(15, s, (10, 10, 15))
     solver.add_conductor(-10, c, (5, 5, 15))
-    # solver.evolve_slice(15)
-    # solver.plot_slice()
-    solver.evolve(iterations=1000)
-    solver.viz_slice(z_slice=15, levels=40)
+    sl = Slab(2, (10, 10))
+    solver.add_conductor(-12, sl, (20, 10, 15))
+    z_slice = 15
+    # solver.evolve_slice(z_slice=z_slice, iterations=1000)
+    solver.evolve()
+    solver.viz_slice(z_slice=z_slice, levels=40)
     plt.show()
