@@ -1,14 +1,17 @@
 from typing import Tuple
 import numpy as np
 from abc import ABC, abstractmethod
+import matplotlib.pyplot as plt
 
+#TODO
+#[ ] check for conductor intersections
 
 class Conductor:
-    def __init__(self, V: float, shape):
+    def __init__(self, V: float, object):
         self.V = V
-        if not isinstance(shape, Shape):
+        if not isinstance(object, Shape):
             raise TypeError("The shape must be a Shape object")
-        self.shape = shape
+        self.shape = object
 
 
 class Insulator:
@@ -77,10 +80,11 @@ class StaticSolver:
         else:
             self.size = np.array(simulation_size)
             self.resolution = resolution
-            self.V = np.zeros(shape=simulation_size)
+            self.V = np.zeros(shape=np.round(self.size / self.resolution).astype(int), dtype=float)
             self.conductor_pixels = np.zeros(
                 shape=np.round(self.size / self.resolution).astype(int), dtype=bool
             )
+            self.conductors = []
 
     def get_bbox(self, obj: Shape):
         if isinstance(obj, Cube):
@@ -122,6 +126,33 @@ class StaticSolver:
 
         return bbox
 
+    def add_conductor(self, voltage:float , object:Shape, position: Tuple[float, float, float]):
+        cond = Conductor(voltage, object)
+
+        if not (isinstance(position, tuple) and len(position) == 3):
+            raise TypeError("dimensions must be a tuple of three integers.")
+        self.conductors.append(cond)
+        self.add_object(cond.shape, position)
+    
+        bbox = self.get_bbox(object)
+        center_scaled = object.center / self.resolution
+        bbox_center = np.round(center_scaled).astype(int)
+
+        position = np.array(position)
+        position_scaled = position / self.resolution
+        position_index = np.round(position_scaled).astype(int)
+        # Compute slices
+        start_index = [position_index[i] - bbox_center[i] for i in range(3)]
+        end_index = [start_index[i] + bbox.shape[i] for i in range(3)]
+
+        # Generate slices for both arrays
+        large_slice = tuple(slice(start_index[i], end_index[i]) for i in range(3))
+        small_slice = tuple(slice(None) for _ in range(3))  # Full range of small array
+        self.V[large_slice] = np.where(
+            bbox[small_slice], voltage, self.V[large_slice]
+        )
+
+
     def add_object(self, object: Shape, position: Tuple[float, float, float]):
         """
         Adds an Insulator or a Conductor to the simulation
@@ -147,17 +178,10 @@ class StaticSolver:
         )
 
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-# Create a 3D boolean array (random for illustration)
-shape = (10, 10, 10)
-
-
 # Function to plot slices along different axes
 def plot_slices(array, slice_indices=None):
     fig, ax = plt.subplots()
-    ax.imshow(array[:, :, slice_indices], cmap="gray")
+    ax.imshow(array[:, :, slice_indices], cmap="viridis", vmin = 0, vmax = 10)
     ax.set_title(f"Slice {i}")
     ax.axis("off")
 
@@ -167,6 +191,8 @@ if __name__ == "__main__":
     s = Sphere(2)
     c = Cube(3)
     sl = Slab(2, (10,10))
+    for i in range(5):
+        solver.add_conductor(3+i,s,(10+3*i,2+i**2,3+2*i))
     solver.get_bbox(s)
     solver.add_object(s, (10, 10, 10))
     solver.add_object(s, (11, 10, 23))
@@ -177,5 +203,5 @@ if __name__ == "__main__":
     solver.add_object(sl, (13,16, 15))
     
     for i in range(300):
-        plot_slices(solver.conductor_pixels, i)
+        plot_slices(solver.V, i)
         plt.show()
