@@ -16,40 +16,45 @@ class Insulator:
 
 
 class Shape(ABC):
-    def __init__(self) -> None:
-        self.center = np.zeros(2)
+    def __init__(self, center=np.zeros(3)) -> None:
+        self.center = np.array(center)
         self.bbox = None
 
 
 class Cube(Shape):
     def __init__(self, side: int = 1):
-        super().__init__()
+        center = (side / 2, side / 2, side / 2)
+        super().__init__(center)
         self.side = side
 
 
 class Brick(Shape):
     def __init__(self, dimensions: Tuple[float, float, float]):
-        super().__init__()
+        center = np.arrray(dimensions) / 2
+        super().__init__(center)
         if not (isinstance(dimensions, tuple) and len(dimensions) == 3):
-            raise TypeError("tuple_arg must be a tuple of three integers.")
+            raise TypeError("dimensions must be a tuple of three integers.")
         self.dimensions = dimensions
 
 
 class Sphere(Shape):
     def __init__(self, radius: float):
-        super().__init__()
+        center = radius * np.ones(3)
+        super().__init__(center)
         self.radius = radius
 
 
 class Slab(Shape):
     def __init__(self, orientation_normal: int, dimensions: Tuple[float, float]):
-        super().__init__()
+        if orientation_normal not in [1, 2, 3]:
+            raise ValueError("The normal direction should be a value in 1,2,3")
+        self.normal = orientation_normal
+        center_ = np.array(dimensions) / 2
+        center = np.insert(center_, self.normal-1, 1)
+        super().__init__(center)
         if not (isinstance(dimensions, tuple) and len(dimensions) == 2):
             raise TypeError("tuple_arg must be a tuple of two integers.")
         self.dimensions = dimensions
-        if orientation_normal not in [1,2,3]:
-            raise ValueError("The normal direction should be a value in 1,2,3")
-        self.normal = orientation_normal
 
 
 class StaticSolver:
@@ -64,10 +69,18 @@ class StaticSolver:
             and all(isinstance(i, int) for i in simulation_size)
         ):
             raise TypeError("tuple_arg must be a tuple of three integers.")
+        for size in simulation_size:
+            if size < resolution:
+                raise ValueError(
+                    f"The size is smaller than the resolution ({resolution})"
+                )
         else:
-            self.size = simulation_size
+            self.size = np.array(simulation_size)
             self.resolution = resolution
             self.V = np.zeros(shape=simulation_size)
+            self.conductor_pixels = np.zeros(
+                shape=np.round(self.size / self.resolution).astype(int), dtype=bool
+            )
 
     def get_bbox(self, obj: Shape):
         if isinstance(obj, Cube):
@@ -102,20 +115,67 @@ class StaticSolver:
                 int(max(dim / self.resolution, 1)) for dim in obj.dimensions
             )
             bbox2d = np.full(dimensions, True, dtype=bool)
-            bbox = np.expand_dims(bbox2d, axis=obj.normal-1)
+            bbox = np.expand_dims(bbox2d, axis=obj.normal - 1)
 
         else:
             raise TypeError(f"Unsupported shape type: {type(obj).__name__}")
 
         return bbox
 
-    def add_object(self, object: Shape):
+    def add_object(self, object: Shape, position: Tuple[float, float, float]):
         """
         Adds an Insulator or a Conductor to the simulation
         """
+        if not (isinstance(position, tuple) and len(position) == 3):
+            raise TypeError("dimensions must be a tuple of three integers.")
+        bbox = self.get_bbox(object)
+        center_scaled = object.center / self.resolution
+        bbox_center = np.round(center_scaled).astype(int)
+
+        position = np.array(position)
+        position_scaled = position / self.resolution
+        position_index = np.round(position_scaled).astype(int)
+        # Compute slices
+        start_index = [position_index[i] - bbox_center[i] for i in range(3)]
+        end_index = [start_index[i] + bbox.shape[i] for i in range(3)]
+
+        # Generate slices for both arrays
+        large_slice = tuple(slice(start_index[i], end_index[i]) for i in range(3))
+        small_slice = tuple(slice(None) for _ in range(3))  # Full range of small array
+        self.conductor_pixels[large_slice] = np.where(
+            bbox[small_slice], 1, self.conductor_pixels[large_slice]
+        )
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Create a 3D boolean array (random for illustration)
+shape = (10, 10, 10)
+
+
+# Function to plot slices along different axes
+def plot_slices(array, slice_indices=None):
+    fig, ax = plt.subplots()
+    ax.imshow(array[:, :, slice_indices], cmap="gray")
+    ax.set_title(f"Slice {i}")
+    ax.axis("off")
 
 
 if __name__ == "__main__":
     solver = StaticSolver(simulation_size=(30, 30, 30))
-    s = Slab(2,(20,10))
+    s = Sphere(2)
+    c = Cube(3)
+    sl = Slab(2, (10,10))
     solver.get_bbox(s)
+    solver.add_object(s, (10, 10, 10))
+    solver.add_object(s, (11, 10, 23))
+    solver.add_object(s, (11, 10, 27))
+    solver.add_object(s, (18, 10, 13))
+    solver.add_object(s, (21, 11, 10))
+    solver.add_object(c, (13, 14, 15))
+    solver.add_object(sl, (13,16, 15))
+    
+    for i in range(300):
+        plot_slices(solver.conductor_pixels, i)
+        plt.show()
