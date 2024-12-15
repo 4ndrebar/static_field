@@ -403,13 +403,19 @@ class StaticSolver:
 
         # --- Third Plot : Plot of electric field magnitude ---
         _, ax3 = plt.subplots(figsize=(8, 6))
-        ax3.imshow(
+        im3 = ax3.imshow(
             E_magnitude,
             extent=[x[0], x[-1], y[0], y[-1]],
             cmap="plasma",  # Vibrant colormap
             origin="lower",
             aspect="equal",
         )
+        plt.colorbar(im3, ax=ax3, label="Electric field (V/m)", shrink=0.8)
+
+        ax3.set_title(f"Electric Field Magnitude Slice at z = {z_slice}", fontsize=12)
+        ax3.set_xlabel("$x$")
+        ax3.set_ylabel("$y$")
+        ax3.set_aspect("equal")
 
         # --- Fourth Plot (Optional): Error Log ---
         if plot_err:
@@ -442,7 +448,7 @@ class StaticSolver:
             plt.show()
 
         # Create the slider for z_slice
-        slider = widgets.interactive(interactive_plot, z_slice=(0, self.size[2], 1))
+        slider = widgets.interactive(interactive_plot, z_slice=(0, self.size[2]-1, 1))
         display(slider)
 
 
