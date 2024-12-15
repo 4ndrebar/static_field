@@ -6,6 +6,10 @@ from scipy.ndimage import convolve, generate_binary_structure
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 import copy
+import ipywidgets as widgets
+from IPython.display import display, clear_output
+
+
 
 # TODO
 # [ ] check for conductor intersections
@@ -107,6 +111,7 @@ class StaticSolver:
         viz_slice(z_slice=None, levels=40, plot_err=True, quiver_scale=(0.1, 1.0)):
             Visualizes a 2D slice of the evolved potential and its gradient.
     """
+
     def __init__(self, simulation_size: Tuple[int, int, int], resolution=0.1):
         if not (
             isinstance(simulation_size, tuple)
@@ -123,7 +128,8 @@ class StaticSolver:
             self.size = np.array(simulation_size)
             self.resolution = resolution
             self.V = np.zeros(
-                shape=np.round(self.size / self.resolution).astype(int), dtype=np.float32
+                shape=np.round(self.size / self.resolution).astype(int),
+                dtype=np.float32,
             )
             self.conductor_pixels = np.zeros(
                 shape=np.round(self.size / self.resolution).astype(int), dtype=np.bool_
@@ -149,7 +155,7 @@ class StaticSolver:
         """
         # Optionally smooth the initial grid
         if sigma is not None:
-            self.V = gaussian_filter(self.V, sigma=sigma, mode='constant')
+            self.V = gaussian_filter(self.V, sigma=sigma, mode="constant")
 
         # Preallocate error history
         self.err = np.zeros(iterations)
@@ -169,7 +175,7 @@ class StaticSolver:
 
             # Compute errors
             diff_sum = np.sum((self.V - V_) ** 2)
-            grid_sum = np.sum(self.V ** 2)
+            grid_sum = np.sum(self.V**2)
             abs_error = diff_sum / grid_size
             rel_error = abs_error / (grid_sum / grid_size)
 
@@ -179,8 +185,8 @@ class StaticSolver:
 
             # Check convergence criteria
             if abs_error < etol or rel_error < rtol:
-                self.err = self.err[:i+1]
-                self.rerr = self.rerr[:i+1]
+                self.err = self.err[: i + 1]
+                self.rerr = self.rerr[: i + 1]
                 break
 
             # Swap V and V_ without deep copying
@@ -189,7 +195,9 @@ class StaticSolver:
         # Save the final evolved grid
         self.V_evolved = self.V
 
-    def evolve_slice(self, z_slice: float, iterations=2000, sigma=None, etol=1e-5, rtol=1e-5):
+    def evolve_slice(
+        self, z_slice: float, iterations=2000, sigma=None, etol=1e-5, rtol=1e-5
+    ):
         z_index = round(z_slice / self.resolution)
 
         # Extract slice without unnecessary copies
@@ -198,7 +206,7 @@ class StaticSolver:
 
         # Optionally smooth the initial slice
         if sigma is not None:
-            grid = gaussian_filter(grid, sigma=sigma, mode='constant')
+            grid = gaussian_filter(grid, sigma=sigma, mode="constant")
 
         # Preallocate error history
         self.err = np.zeros(iterations)
@@ -208,7 +216,6 @@ class StaticSolver:
         V_ = np.zeros_like(grid, dtype=grid.dtype)
 
         grid_size = grid.size  # For efficiency in error calculation
-        
 
         for i in tqdm(range(iterations)):
             # Perform convolution
@@ -219,7 +226,7 @@ class StaticSolver:
 
             # Compute errors
             diff_sum = np.sum((grid - V_) ** 2)
-            grid_sum = np.sum(grid ** 2)
+            grid_sum = np.sum(grid**2)
             abs_error = diff_sum / grid_size
             rel_error = abs_error / (grid_sum / grid_size)
 
@@ -229,8 +236,8 @@ class StaticSolver:
 
             # Check convergence criteria
             if abs_error < etol or rel_error < rtol:
-                self.err = self.err[:i+1]
-                self.rerr = self.rerr[:i+1]
+                self.err = self.err[: i + 1]
+                self.rerr = self.rerr[: i + 1]
                 break
 
             # Swap grid and V_ without deep copying
@@ -238,8 +245,6 @@ class StaticSolver:
 
         # Save the final evolved slice
         self.V_evolved = grid
-
-
 
     def get_bbox(self, obj: Shape):
         shape_type = type(obj).__name__
@@ -367,14 +372,14 @@ class StaticSolver:
 
         # Compute gradient (negative for electric field)
         E = np.gradient(-array_slice, self.resolution, self.resolution)
-        Ey,Ex = E
+        Ey, Ex = E
         # Compute the magnitude of the gradient
-        E_magnitude = np.sqrt(Ex**2+Ey**2)
+        E_magnitude = np.sqrt(Ex**2 + Ey**2)
 
         # Normalize and scale the gradient vectors
         max_magnitude = E_magnitude.max()
         scale_factor = (quiver_scale[1] - quiver_scale[0]) / max_magnitude
-        Ey_norm, Ex_norm = [Ei*scale_factor for Ei in E]
+        Ey_norm, Ex_norm = [Ei * scale_factor for Ei in E]
 
         # Background potential map
         im2 = ax2.imshow(
@@ -388,29 +393,29 @@ class StaticSolver:
         plt.colorbar(im2, ax=ax2, label="Potential (V)", shrink=0.8)
 
         # Quiver plot with scaled arrow lengths
-        ax2.quiver(xx, yy, Ex_norm, Ey_norm, color="black", width=0.002, headwidth=3, alpha=0.8)
+        ax2.quiver(
+            xx, yy, Ex_norm, Ey_norm, color="black", width=0.002, headwidth=3, alpha=0.8
+        )
         ax2.set_title(f"Electric Field Gradient Slice at z = {z_slice}", fontsize=12)
         ax2.set_xlabel("$x$")
         ax2.set_ylabel("$y$")
         ax2.set_aspect("equal")
-        
-        # --- Third Plot : Plot of electric field magnitude ---
-        _, ax3 = plt.subplots(figsize = (8,6))
-        ax3.imshow(
-        E_magnitude,
-        extent=[x[0], x[-1], y[0], y[-1]],
-        cmap="plasma",  # Vibrant colormap
-        origin="lower",
-        aspect="equal",
-        )
-        
 
+        # --- Third Plot : Plot of electric field magnitude ---
+        _, ax3 = plt.subplots(figsize=(8, 6))
+        ax3.imshow(
+            E_magnitude,
+            extent=[x[0], x[-1], y[0], y[-1]],
+            cmap="plasma",  # Vibrant colormap
+            origin="lower",
+            aspect="equal",
+        )
 
         # --- Fourth Plot (Optional): Error Log ---
         if plot_err:
             _, ax4 = plt.subplots(figsize=(8, 6))
-            ax4.semilogy(np.arange(len(self.err)), self.err, label = "absolute error")
-            ax4.semilogy(np.arange(len(self.rerr)), self.rerr, label = "relative error")
+            ax4.semilogy(np.arange(len(self.err)), self.err, label="absolute error")
+            ax4.semilogy(np.arange(len(self.rerr)), self.rerr, label="relative error")
             ax4.set_title("Error Log")
             ax4.set_xlabel("Epoch")
             ax4.set_ylabel("Error")
@@ -419,6 +424,26 @@ class StaticSolver:
 
         # Show all plots
         plt.show()
+
+    def interactive_viz(self, z_slice=None, levels=40):
+        """
+        Method to visualize a 2D slice of the evolved potential and its gradient interactively.
+        
+        Parameters:
+        z_slice: float, the z-coordinate of the slice to plot (optional for 3D systems).
+        levels: int, the number of contour levels for the potential.
+        """
+        def interactive_plot(z_slice):
+            # Clear the previous plot before drawing the new one
+            clear_output(wait=True)
+
+            # Visualize the slice with the updated z_slice value
+            self.viz_slice(z_slice=z_slice, levels=levels, plot_err=False)
+            plt.show()
+
+        # Create the slider for z_slice
+        slider = widgets.interactive(interactive_plot, z_slice=(0, self.size[2], 1))
+        display(slider)
 
 
 if __name__ == "__main__":
@@ -437,5 +462,5 @@ if __name__ == "__main__":
     z_slice = 15
     # solver.evolve_slice(z_slice=z_slice, iterations=1000)
     solver.evolve()
-    solver.viz_slice(z_slice=z_slice, levels=40)
+    solver.interactive_viz(z_slice=z_slice)
     plt.show()
