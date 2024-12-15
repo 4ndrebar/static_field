@@ -52,15 +52,20 @@ plt.show()
 
 # Initialize the solver with grid size, resolution, and boundary conditions
 solver = StaticSolver(simulation_size=(30, 30, 30), resolution=resolution)
+
+# Create the Shapes
 s = Sphere(2)
 c = Cube(3)
 sl = Slab(1, (10, 10))
 ss = Sphere(1)
+
+#Add the conductors to the simulation assigning a Voltage, a Shape and a position
 solver.add_conductor(5, s, (20, 15, 15))
 solver.add_conductor(15, s, (10, 10, 15))
 solver.add_conductor(13, sl, (15, 23, 15))
 solver.add_conductor(-10, c, (5, 5, 15))
 z_slice = 15
+
 # Evolve the entire grid and visuzlize the field at a specific z-coordinate
 solver.evolve()
 solver.interactive_viz(z_slice=z_slice)
