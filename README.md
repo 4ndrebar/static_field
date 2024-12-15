@@ -64,10 +64,10 @@ solver.add_conductor(5, s, (20, 15, 15))
 solver.add_conductor(15, s, (10, 10, 15))
 solver.add_conductor(13, sl, (15, 23, 15))
 solver.add_conductor(-10, c, (5, 5, 15))
-z_slice = 15
 
 # Evolve the entire grid and visuzlize the field at a specific z-coordinate
 solver.evolve()
+z_slice = 15
 solver.interactive_viz(z_slice=z_slice)
 plt.show()
 ```
