@@ -1,11 +1,11 @@
 # Static Field Simulator
 
 ## Overview
-The Static Field Simulator is a Python-based simulation tool designed to model and evolve a static electric field in a 2D grid. The system applies numerical methods such as convolution and Gaussian filtering to simulate the evolution of electric potentials and fields within a given space. It is particularly useful for exploring how static fields evolve under boundary conditions and other constraints.
+The Static Field Simulator is a Python-based simulation tool designed to model a static electric field in a 2D grid.
 
 ## Features
-- Simulate the evolution of a static field over multiple iterations.
-- Convolution and Gaussian filtering for smoothing and processing.
+- Calculate a static Electric field for a distribution of Insulators and conductors.
+- The solution is calculated with the relaxation method.
 - Support for boundary conditions (e.g., conductors) in the simulation.
 - Early stopping criteria based on error convergence.
 - Efficient handling of 2D slices of 3D data for faster processing.
@@ -95,7 +95,8 @@ For 3D simulations, evolving multiple slices can be slow, so consider optimizati
 
 ## Contributing
 
-If you'd like to contribute to the project, feel free to fork the repository, make your changes, and create a pull request. Ensure that your code adheres to the existing coding standards and includes appropriate tests for any new functionality.
+If you'd like to contribute to the project, feel free to fork the repository, make your changes, and create a pull request. 
+Ensure that your code adheres to the existing coding standards and includes appropriate tests for any new functionality.
 
 ## License
 
